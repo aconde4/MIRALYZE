@@ -14,6 +14,7 @@ from utils.theme import COLORS, get_plotly_layout
 
 
 PLOTLY_CONFIG = {"displayModeBar": False, "responsive": True}
+TABLE_RESULT_LIMIT = 1000
 
 
 def render():
@@ -67,6 +68,15 @@ def render():
         placeholders = ",".join(["%s"] * len(selected_cnaes))
         query += f" AND c.cnae_code IN ({placeholders})"
         params.extend(selected_cnaes)
+    if rev_min > 0:
+        query += " AND f.revenue >= %s"
+        params.append(rev_min)
+    if rev_max > 0:
+        query += " AND f.revenue <= %s"
+        params.append(rev_max)
+    if emp_min > 0:
+        query += " AND f.employees >= %s"
+        params.append(emp_min)
 
     query += " ORDER BY c.company_name"
     rows = execute_query(query, tuple(params))
@@ -88,8 +98,15 @@ def render():
     st.caption(f"{len(df)} empresas encontradas para {selected_year}. Importes en miles EUR.")
 
     df = _apply_scoring(df)
-    df_display = _format_table(df)
+    df_visible = df.head(TABLE_RESULT_LIMIT).copy()
+    df_display = _format_table(df_visible)
     st.caption("Haz click en una empresa de la tabla para abrir su ficha.")
+    if len(df) > TABLE_RESULT_LIMIT:
+        st.info(
+            f"Mostrando las primeras {TABLE_RESULT_LIMIT} empresas por score. "
+            "La exportación CSV incluye todos los resultados filtrados."
+        )
+
     table_event = st.dataframe(
         df_display,
         use_container_width=True,
@@ -101,11 +118,11 @@ def render():
     selected_rows = table_event.selection.rows
     if selected_rows:
         selected_position = selected_rows[0]
-        st.session_state["selected_company_id"] = int(df.iloc[selected_position]["id"])
+        st.session_state["selected_company_id"] = int(df_visible.iloc[selected_position]["id"])
         st.session_state["nav_page"] = "Ficha de empresa"
         st.rerun()
 
-    csv_data = df_display.to_csv(index=False).encode("utf-8")
+    csv_data = _format_table(df).to_csv(index=False).encode("utf-8")
     st.download_button(
         "Exportar a CSV",
         csv_data,

@@ -9,6 +9,9 @@ from database.db_manager import execute_query
 from utils.helpers import format_euros, get_available_cnaes, get_available_countries
 
 
+INITIAL_RESULT_LIMIT = 500
+
+
 def render():
     st.title("Listado de empresas")
 
@@ -22,17 +25,23 @@ def render():
     with col4:
         selected_cnaes = st.multiselect("CNAE", get_available_cnaes())
 
+    has_filters = bool(search_text or search_cif or selected_countries or selected_cnaes)
+
     query = """
+        WITH latest_financials AS (
+            SELECT DISTINCT ON (company_id)
+                   company_id, year, revenue
+            FROM financials
+            ORDER BY company_id, year DESC
+        )
         SELECT c.id, c.company_name AS empresa, c.cif, c.country AS pais,
                c.province AS provincia, c.cnae_code AS cnae,
                f.year AS ultimo_ano, f.revenue,
                m.ebitda_margin, m.revenue_growth_yoy
         FROM companies c
-        LEFT JOIN financials f ON c.id = f.company_id
+        JOIN latest_financials f ON c.id = f.company_id
         LEFT JOIN metrics m ON c.id = m.company_id AND f.year = m.year
-        WHERE f.year = (
-            SELECT MAX(f2.year) FROM financials f2 WHERE f2.company_id = c.id
-        )
+        WHERE 1 = 1
     """
     params = []
 
@@ -52,6 +61,10 @@ def render():
         params.extend(selected_cnaes)
 
     query += " ORDER BY c.company_name"
+    if not has_filters:
+        query += " LIMIT %s"
+        params.append(INITIAL_RESULT_LIMIT)
+
     rows = execute_query(query, tuple(params))
 
     if not rows:
@@ -73,7 +86,13 @@ def render():
         "Revenue (miles EUR)", "Margen EBITDA", "Crec. Revenue YoY",
     ]
 
-    st.caption(f"{len(df_display)} empresas encontradas")
+    if not has_filters and len(df_display) >= INITIAL_RESULT_LIMIT:
+        st.info(
+            f"Mostrando primeras {INITIAL_RESULT_LIMIT} empresas. "
+            "Usa búsqueda o filtros para acotar el universo completo."
+        )
+    else:
+        st.caption(f"{len(df_display)} empresas encontradas")
     st.dataframe(
         df_display.drop(columns=["ID"]),
         use_container_width=True,
