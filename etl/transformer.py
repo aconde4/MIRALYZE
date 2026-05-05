@@ -19,6 +19,29 @@ FINANCIAL_FIELDS = [
     "short_term_debts", "equity", "net_income", "cash_flow",
 ]
 
+FINANCIAL_UPSERT_SQL = """
+    INSERT INTO financials
+       (company_id, year, cash_and_equivalents, total_assets, working_capital,
+        employees, revenue, cost_of_goods_sold, ebitda, long_term_debts,
+        short_term_debts, equity, net_income, cash_flow)
+       VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+       ON CONFLICT (company_id, year) DO UPDATE SET
+        cash_and_equivalents = EXCLUDED.cash_and_equivalents,
+        total_assets = EXCLUDED.total_assets,
+        working_capital = EXCLUDED.working_capital,
+        employees = EXCLUDED.employees,
+        revenue = EXCLUDED.revenue,
+        cost_of_goods_sold = EXCLUDED.cost_of_goods_sold,
+        ebitda = EXCLUDED.ebitda,
+        long_term_debts = EXCLUDED.long_term_debts,
+        short_term_debts = EXCLUDED.short_term_debts,
+        equity = EXCLUDED.equity,
+        net_income = EXCLUDED.net_income,
+        cash_flow = EXCLUDED.cash_flow
+"""
+
+BATCH_SIZE = 500
+
 
 def transform_and_load(
     df_valid: pd.DataFrame,
@@ -41,18 +64,34 @@ def transform_and_load(
         df_valid["bvd_id"] = df_valid["bvd_id"].map(_clean_text).str.upper()
     if "date_of_establishment" in df_valid.columns:
         df_valid["date_of_establishment"] = df_valid["date_of_establishment"].map(_parse_date)
+    df_valid["_company_key"] = df_valid.apply(_company_key, axis=1)
 
     affected_company_ids = set()
 
     with get_connection() as conn:
         with conn.cursor() as cur:
-            total_valid = len(df_valid)
-            for row_index, (_, row) in enumerate(df_valid.iterrows(), start=1):
+            company_rows = df_valid.drop_duplicates("_company_key")
+            company_ids_by_key = {}
+            total_steps = len(company_rows) + len(df_valid)
+            completed_steps = 0
+
+            for _, row in company_rows.iterrows():
                 company_id = _upsert_company(cur, row)
-                _upsert_financial(cur, company_id, row)
+                company_ids_by_key[row["_company_key"]] = company_id
                 affected_company_ids.add(company_id)
                 if progress_callback:
-                    progress_callback(row_index, total_valid)
+                    completed_steps += 1
+                    progress_callback(completed_steps, total_steps)
+
+            financial_records = [
+                _financial_params(company_ids_by_key[row["_company_key"]], row)
+                for _, row in df_valid.iterrows()
+            ]
+            for chunk in _chunks(financial_records, BATCH_SIZE):
+                cur.executemany(FINANCIAL_UPSERT_SQL, chunk)
+                if progress_callback:
+                    completed_steps += len(chunk)
+                    progress_callback(completed_steps, total_steps)
 
             import_id = _log_import(
                 cur, file_name, file_type, load_mode,
@@ -145,28 +184,12 @@ def _find_company_id(cur, bvd_id, cif, company_name):
 
 
 def _upsert_financial(cur, company_id: int, row):
+    cur.execute(FINANCIAL_UPSERT_SQL, _financial_params(company_id, row))
+
+
+def _financial_params(company_id: int, row) -> tuple:
     values = [_db_value(row.get(field)) for field in FINANCIAL_FIELDS]
-    cur.execute(
-        """INSERT INTO financials
-           (company_id, year, cash_and_equivalents, total_assets, working_capital,
-            employees, revenue, cost_of_goods_sold, ebitda, long_term_debts,
-            short_term_debts, equity, net_income, cash_flow)
-           VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
-           ON CONFLICT (company_id, year) DO UPDATE SET
-            cash_and_equivalents = EXCLUDED.cash_and_equivalents,
-            total_assets = EXCLUDED.total_assets,
-            working_capital = EXCLUDED.working_capital,
-            employees = EXCLUDED.employees,
-            revenue = EXCLUDED.revenue,
-            cost_of_goods_sold = EXCLUDED.cost_of_goods_sold,
-            ebitda = EXCLUDED.ebitda,
-            long_term_debts = EXCLUDED.long_term_debts,
-            short_term_debts = EXCLUDED.short_term_debts,
-            equity = EXCLUDED.equity,
-            net_income = EXCLUDED.net_income,
-            cash_flow = EXCLUDED.cash_flow""",
-        (company_id, int(row["year"]), *values),
-    )
+    return (company_id, int(row["year"]), *values)
 
 
 def _log_import(cur, file_name, file_type, load_mode,
@@ -182,15 +205,29 @@ def _log_import(cur, file_name, file_type, load_mode,
 
 
 def _log_errors(cur, import_id: int, df_rejected: pd.DataFrame):
+    records = []
     for i, (_, row) in enumerate(df_rejected.iterrows()):
         row_num = row.get("_row_number", i + 2)
         reason = row.get("rejection_reason", "Error desconocido")
-        cur.execute(
-            """INSERT INTO import_errors
-               (import_id, row_number, error_type, error_description)
-               VALUES (%s, %s, %s, %s)""",
-            (import_id, int(row_num) if pd.notna(row_num) else i + 2, "validation", reason),
+        records.append(
+            (import_id, int(row_num) if pd.notna(row_num) else i + 2, "validation", reason)
         )
+    cur.executemany(
+        """INSERT INTO import_errors
+           (import_id, row_number, error_type, error_description)
+           VALUES (%s, %s, %s, %s)""",
+        records,
+    )
+
+
+def _company_key(row) -> tuple:
+    bvd_id = _clean_text(row.get("bvd_id"))
+    if bvd_id:
+        return ("bvd_id", str(bvd_id).upper())
+    cif = _clean_text(row.get("cif"))
+    if cif:
+        return ("cif", str(cif).upper())
+    return ("name", str(row.get("company_name", "")).strip().lower())
 
 
 def _db_value(value):
@@ -223,3 +260,8 @@ def _parse_date(value):
     if pd.isna(parsed):
         return None
     return parsed.date()
+
+
+def _chunks(values: list[tuple], size: int):
+    for start in range(0, len(values), size):
+        yield values[start:start + size]

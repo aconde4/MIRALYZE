@@ -103,7 +103,7 @@ def _run_import(file_name, load_mode, df_valid, df_rejected, total_rows):
         pct = current / total if total else 1
         progress.progress(
             min(0.70, pct * 0.70),
-            text=f"Importando filas validadas: {current}/{total}",
+            text=f"Guardando en Supabase: {current}/{total} operaciones",
         )
 
     def metrics_progress(current, total):

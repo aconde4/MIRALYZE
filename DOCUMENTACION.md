@@ -1924,3 +1924,48 @@ Objetivo:
 Que Miralyze muestre identidad visual tambien en la pestana del navegador y en
 la zona asociada al buscador/barra de direccion, manteniendo coherencia con el
 logo del sidebar.
+
+## 22. Optimizacion de importacion en Streamlit Cloud
+
+Fecha de documentacion: 2026-05-05.
+
+Tras el despliegue en Streamlit Community Cloud se observo que la importacion de
+ficheros grandes era sensiblemente mas lenta que en local. La causa principal no
+estaba en la lectura del Excel, sino en el numero de viajes pequenos entre la
+app y Supabase.
+
+Problemas detectados:
+
+- La tabla normalizada contiene una fila por empresa y ano. Por tanto, una
+  empresa con siete ejercicios generaba siete filas financieras.
+- Antes de la optimizacion, cada fila anual provocaba tambien una busqueda y un
+  upsert de empresa, aunque la empresa fuese la misma.
+- El recalculo de metricas recorria las empresas afectadas una a una, ejecutando
+  una consulta de historico por empresa y varios upserts individuales.
+
+Cambios aplicados:
+
+- En `etl/transformer.py` se agrupan las empresas unicas antes de persistir.
+  Cada empresa se busca/inserta/actualiza una sola vez por importacion.
+- Los registros de `financials` se insertan o actualizan mediante `executemany`
+  en lotes de 500 filas.
+- Los errores de importacion se registran tambien por lotes.
+- En `metrics/calculator.py` el recalculo de metricas procesa empresas en
+  bloques de 500 y guarda metricas en lotes de 1.000 registros.
+- La barra de progreso de la importacion se mantiene, pero ahora refleja
+  operaciones de guardado por bloques en Supabase.
+
+Decisiones de seguridad:
+
+- No se ha modificado el esquema de Supabase.
+- No se han cambiado las formulas financieras.
+- No se ha cambiado la definicion de deuda bruta, deuda neta ni ratios.
+- No se ha cambiado la validacion de datos ni el formato esperado del Excel.
+- La optimizacion afecta solo al patron de persistencia y recalculo.
+
+Efecto esperado:
+
+La mejora deberia notarse especialmente en importaciones de miles de empresas,
+porque se reducen muchas operaciones repetidas de empresa y se disminuye el
+numero de llamadas individuales a Supabase. La importacion seguira tardando en
+ficheros grandes, pero deberia ser mas estable y rapida en Streamlit Cloud.
