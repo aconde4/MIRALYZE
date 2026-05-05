@@ -1895,3 +1895,32 @@ Para el crecimiento revenue se mantiene el filtro practico:
 
 Esto evita que valores extremos de crecimiento contaminen la comparativa entre
 sectores.
+
+## 21. Icono de pagina del navegador
+
+Fecha de documentacion: 2026-05-05.
+
+Se detecto que la aplicacion conservaba el icono generico de Streamlit/emoji en
+la pestana del navegador, aunque el logo del sidebar ya estaba correctamente
+integrado.
+
+Solucion:
+
+- Se creo el asset cuadrado `assets/logo_miralyze_icon.png` a partir del simbolo
+  dorado del logo corporativo.
+- Se sustituyo `page_icon="📊"` por el asset de Miralyze en `st.set_page_config`.
+- Se mantiene `assets/logo_miralyze_sidebar.png` para el sidebar, ya que ese
+  formato horizontal funciona mejor en la navegacion lateral.
+
+Implementacion:
+
+```text
+app.py
+assets/logo_miralyze_icon.png
+```
+
+Objetivo:
+
+Que Miralyze muestre identidad visual tambien en la pestana del navegador y en
+la zona asociada al buscador/barra de direccion, manteniendo coherencia con el
+logo del sidebar.

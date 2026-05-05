@@ -3,20 +3,24 @@ Punto de entrada de la aplicación Streamlit.
 Gestiona la navegación entre vistas.
 """
 
-import os
 import sys
+from pathlib import Path
 
+from PIL import Image
 import streamlit as st
 
 # Asegurar que el directorio raíz del proyecto está en el path.
-sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+PROJECT_ROOT = Path(__file__).resolve().parent
+sys.path.insert(0, str(PROJECT_ROOT))
 
 from utils.theme import CSS_STYLES
 
+with Image.open(PROJECT_ROOT / "assets" / "logo_miralyze_icon.png") as icon:
+    PAGE_ICON = icon.copy()
 
 st.set_page_config(
     page_title="Miralyze",
-    page_icon="📊",
+    page_icon=PAGE_ICON,
     layout="wide",
     initial_sidebar_state="expanded",
 )
@@ -25,12 +29,8 @@ st.set_page_config(
 st.markdown(CSS_STYLES, unsafe_allow_html=True)
 
 # Logo en sidebar.
-_logo_path = os.path.join(
-    os.path.dirname(os.path.abspath(__file__)),
-    "assets",
-    "logo_miralyze_sidebar.png",
-)
-st.sidebar.image(_logo_path, use_container_width=True)
+_logo_path = PROJECT_ROOT / "assets" / "logo_miralyze_sidebar.png"
+st.sidebar.image(str(_logo_path), use_container_width=True)
 st.sidebar.markdown("---")
 
 PAGES = {
