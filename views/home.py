@@ -60,15 +60,19 @@ def render():
 
 
 def _get_stats() -> dict:
-    companies = execute_query("SELECT COUNT(*) AS c FROM companies")
-    financials = execute_query("SELECT COUNT(*) AS c FROM financials")
-    imports = execute_query("SELECT COUNT(*) AS c FROM import_log")
-    countries = execute_query("SELECT COUNT(DISTINCT country) AS c FROM companies")
+    rows = execute_query(
+        """SELECT
+              (SELECT COUNT(*) FROM companies) AS total_companies,
+              (SELECT COUNT(*) FROM financials) AS total_financials,
+              (SELECT COUNT(*) FROM import_log) AS total_imports,
+              (SELECT COUNT(DISTINCT country) FROM companies) AS total_countries"""
+    )
+    stats = rows[0] if rows else {}
     return {
-        "total_companies": companies[0]["c"] if companies else 0,
-        "total_financials": financials[0]["c"] if financials else 0,
-        "total_imports": imports[0]["c"] if imports else 0,
-        "total_countries": countries[0]["c"] if countries else 0,
+        "total_companies": stats.get("total_companies", 0),
+        "total_financials": stats.get("total_financials", 0),
+        "total_imports": stats.get("total_imports", 0),
+        "total_countries": stats.get("total_countries", 0),
     }
 
 

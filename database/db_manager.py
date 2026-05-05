@@ -69,10 +69,38 @@ def init_db():
 
 def execute_query(query: str, params: tuple = ()) -> list[dict]:
     """Run a SELECT query and return rows as dictionaries."""
+    try:
+        return _cached_execute_query(query, tuple(params or ()))
+    except RuntimeError:
+        return _execute_query_uncached(query, tuple(params or ()))
+
+
+def _execute_query_uncached(query: str, params: tuple = ()) -> list[dict]:
+    """Run a SELECT query without Streamlit caching."""
     with get_connection() as conn:
         with conn.cursor() as cur:
             cur.execute(query, params)
             return [_coerce_row(row) for row in cur.fetchall()]
+
+
+try:
+    import streamlit as st
+
+    @st.cache_data(ttl=300, show_spinner=False)
+    def _cached_execute_query(query: str, params: tuple = ()) -> list[dict]:
+        return _execute_query_uncached(query, params)
+
+except Exception:
+    def _cached_execute_query(query: str, params: tuple = ()) -> list[dict]:
+        raise RuntimeError("Streamlit cache unavailable")
+
+
+def clear_query_cache() -> None:
+    """Clear cached SELECT results after data-changing operations."""
+    try:
+        _cached_execute_query.clear()
+    except Exception:
+        pass
 
 
 def execute_insert(query: str, params: tuple = ()):
@@ -85,7 +113,9 @@ def execute_insert(query: str, params: tuple = ()):
                 if not row:
                     return None
                 row = _coerce_row(row)
+                clear_query_cache()
                 return next(iter(row.values())) if isinstance(row, dict) else row[0]
+            clear_query_cache()
             return None
 
 
@@ -94,6 +124,7 @@ def execute_update(query: str, params: tuple = ()) -> int:
     with get_connection() as conn:
         with conn.cursor() as cur:
             cur.execute(query, params)
+            clear_query_cache()
             return cur.rowcount
 
 
@@ -102,6 +133,7 @@ def execute_many(query: str, params_list: list[tuple]) -> None:
     with get_connection() as conn:
         with conn.cursor() as cur:
             cur.executemany(query, params_list)
+            clear_query_cache()
 
 
 def _coerce_row(row: dict) -> dict:

@@ -7,7 +7,7 @@ import os
 import pandas as pd
 import streamlit as st
 
-from database.db_manager import execute_query
+from database.db_manager import clear_query_cache, execute_query
 from etl.loader import load_file
 from etl.transformer import transform_and_load
 from etl.validator import validate
@@ -133,6 +133,7 @@ def _run_import(file_name, load_mode, df_valid, df_rejected, total_rows):
                 progress_callback=metrics_progress,
             )
 
+        clear_query_cache()
         progress.progress(1.0, text="Importación completada")
         status.empty()
         st.success(
