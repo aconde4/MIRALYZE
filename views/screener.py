@@ -8,7 +8,8 @@ import streamlit as st
 
 from database.db_manager import execute_query
 from utils.helpers import (
-    format_euros, get_available_cnaes, get_available_countries, get_available_years,
+    format_euros, get_available_cnaes, get_available_countries,
+    get_available_provinces, get_available_years,
 )
 from utils.theme import COLORS, get_plotly_layout
 
@@ -29,6 +30,7 @@ def render():
         st.subheader("Filtros del screener")
         selected_year = st.selectbox("Año de análisis", years)
         selected_countries = st.multiselect("País", get_available_countries())
+        selected_provinces = st.multiselect("Provincia", get_available_provinces())
         selected_cnaes = st.multiselect("CNAE", get_available_cnaes())
 
         st.markdown("---")
@@ -36,6 +38,18 @@ def render():
         rev_max = st.number_input(
             "Revenue máximo (miles EUR)", min_value=0, value=0, step=100,
             help="0 = sin límite",
+        )
+        ebitda_min = st.number_input(
+            "EBITDA mínimo (miles EUR)",
+            value=None,
+            step=100,
+            placeholder="Sin límite",
+        )
+        ebitda_max = st.number_input(
+            "EBITDA máximo (miles EUR)",
+            value=None,
+            step=100,
+            placeholder="Sin límite",
         )
         ebitda_margin_min = st.slider("Margen EBITDA mínimo (%)", -100, 100, -100)
         rev_growth_min = st.slider("Crec. Revenue YoY mínimo (%)", -100, 200, -100)
@@ -46,7 +60,7 @@ def render():
         emp_min = st.number_input("Empleados mínimo", min_value=0, value=0, step=10)
 
     query = """
-        SELECT c.id, c.company_name, c.cif, c.country, c.cnae_code,
+        SELECT c.id, c.company_name, c.cif, c.country, c.province, c.cnae_code,
                f.revenue, f.ebitda, f.employees, f.cash_flow,
                m.ebitda_margin, m.net_income_margin,
                m.revenue_growth_yoy, m.ebitda_growth_yoy,
@@ -64,6 +78,10 @@ def render():
         placeholders = ",".join(["%s"] * len(selected_countries))
         query += f" AND c.country IN ({placeholders})"
         params.extend(selected_countries)
+    if selected_provinces:
+        placeholders = ",".join(["%s"] * len(selected_provinces))
+        query += f" AND c.province IN ({placeholders})"
+        params.extend(selected_provinces)
     if selected_cnaes:
         placeholders = ",".join(["%s"] * len(selected_cnaes))
         query += f" AND c.cnae_code IN ({placeholders})"
@@ -74,6 +92,12 @@ def render():
     if rev_max > 0:
         query += " AND f.revenue <= %s"
         params.append(rev_max)
+    if ebitda_min is not None:
+        query += " AND f.ebitda >= %s"
+        params.append(ebitda_min)
+    if ebitda_max is not None:
+        query += " AND f.ebitda <= %s"
+        params.append(ebitda_max)
     if emp_min > 0:
         query += " AND f.employees >= %s"
         params.append(emp_min)
@@ -87,7 +111,7 @@ def render():
 
     df = pd.DataFrame(rows)
     df = _apply_numeric_filters(
-        df, rev_min, rev_max, ebitda_margin_min, rev_growth_min,
+        df, rev_min, rev_max, ebitda_min, ebitda_max, ebitda_margin_min, rev_growth_min,
         nd_ebitda_max, emp_min,
     )
 
@@ -133,12 +157,16 @@ def render():
     _render_priority_chart(df)
 
 
-def _apply_numeric_filters(df, rev_min, rev_max, ebitda_margin_min,
+def _apply_numeric_filters(df, rev_min, rev_max, ebitda_min, ebitda_max, ebitda_margin_min,
                            rev_growth_min, nd_ebitda_max, emp_min):
     if rev_min > 0:
         df = df[df["revenue"] >= rev_min]
     if rev_max > 0:
         df = df[df["revenue"] <= rev_max]
+    if ebitda_min is not None:
+        df = df[df["ebitda"].notna() & (df["ebitda"] >= ebitda_min)]
+    if ebitda_max is not None:
+        df = df[df["ebitda"].notna() & (df["ebitda"] <= ebitda_max)]
     if ebitda_margin_min > -100:
         df = df[df["ebitda_margin"].notna() & (df["ebitda_margin"] >= ebitda_margin_min / 100)]
     if rev_growth_min > -100:
@@ -303,6 +331,7 @@ def _format_table(df: pd.DataFrame) -> pd.DataFrame:
     display["Empresa"] = df["company_name"]
     display["CIF"] = df["cif"]
     display["País"] = df["country"]
+    display["Provincia"] = df["province"]
     display["CNAE"] = df["cnae_code"]
     display["Revenue (miles EUR)"] = df["revenue"].apply(format_euros)
     display["EBITDA (miles EUR)"] = df["ebitda"].apply(format_euros)
