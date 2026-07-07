@@ -33,6 +33,17 @@ def get_available_countries() -> list[str]:
     return [r["country"] for r in rows]
 
 
+def get_available_provinces() -> list[str]:
+    rows = execute_query(
+        """SELECT DISTINCT province
+           FROM companies
+           WHERE province IS NOT NULL
+             AND trim(province) <> ''
+           ORDER BY province"""
+    )
+    return [r["province"] for r in rows]
+
+
 def get_available_cnaes() -> list[str]:
     rows = execute_query("SELECT DISTINCT cnae_code FROM companies ORDER BY cnae_code")
     return [r["cnae_code"] for r in rows]
